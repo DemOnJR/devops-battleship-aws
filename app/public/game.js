@@ -129,6 +129,8 @@ document.getElementById('btn-random').addEventListener('click', () => { myName =
 document.getElementById('btn-cancel-search').addEventListener('click', () => { socket.emit('cancelSearch'); document.getElementById('waiting-section').classList.add('hidden'); document.getElementById('btn-random').disabled = false; document.getElementById('btn-create').disabled = false; });
 document.getElementById('btn-copy').addEventListener('click', () => { const input = document.getElementById('invite-link'); input.select(); navigator.clipboard.writeText(input.value).then(() => { const btn = document.getElementById('btn-copy'); btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); }); });
 document.getElementById('btn-play-again').addEventListener('click', () => { clearSession(); window.location.href = window.location.origin; });
+document.getElementById('btn-leave-placement').addEventListener('click', () => { if (confirm('Abandon ship? Yer opponent will win!')) { socket.emit('leaveGame'); clearSession(); window.location.href = window.location.origin; } });
+document.getElementById('btn-leave-battle').addEventListener('click', () => { if (confirm('Abandon ship? Yer opponent will win!')) { socket.emit('leaveGame'); clearSession(); window.location.href = window.location.origin; } });
 
 // ─── Socket Events: Menu ───────────────────────────────────────
 socket.on('gameCreated', (data) => { gameId = data.gameId; myId = data.playerId; saveSession(gameId, myId); document.getElementById('invite-link').value = window.location.origin + '?join=' + gameId; document.getElementById('invite-section').classList.remove('hidden'); document.getElementById('btn-create').disabled = true; document.getElementById('btn-random').disabled = true; });

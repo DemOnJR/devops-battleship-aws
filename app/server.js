@@ -548,6 +548,23 @@ io.on('connection', (socket) => {
     await saveGame(game);
   });
 
+  socket.on('leaveGame', async () => {
+    if (!socket.gameId || !socket.playerId) return;
+    const game = await getGame(socket.gameId);
+    if (!game) return;
+    clearIdleTimer(game.id);
+    clearDisconnectTimer(game.id, socket.playerId);
+    const opId = game.playerOrder.find(p => p !== socket.playerId);
+    if (opId) {
+      io.to(game.id).emit('opponentLeft', { message: 'Opponent abandoned ship! You win!' });
+      io.to(game.id).emit('jackMessage', { text: "They've fled! Probably heard I was watching. Can't blame 'em, really." });
+    }
+    await deleteGame(game.id);
+    socket.leave(game.id);
+    socket.gameId = null;
+    socket.playerId = null;
+  });
+
   socket.on('disconnect', async () => {
     // Remove from lobby if they were waiting
     if (playerId) {

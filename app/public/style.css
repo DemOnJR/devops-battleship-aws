@@ -125,6 +125,8 @@ body {
 .score-display { margin-top: 5px; font-size: 0.95rem; }
 .score { color: var(--text-muted); }
 .score-divider { margin: 0 10px; color: var(--wood-2); }
+.leave-btn { margin-left: 15px; padding: 4px 12px; font-family: 'MedievalSharp', cursive; font-size: 0.85rem; background: transparent; border: 1px solid var(--red); color: var(--red-bright); border-radius: 4px; cursor: pointer; transition: all 0.2s; vertical-align: middle; }
+.leave-btn:hover { background: var(--red); color: var(--text-light); }
 .battle-layout { display: flex; gap: 15px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
 .board-wrapper { text-align: center; }
 .board-wrapper h3 { font-family: 'Pirata One', cursive; font-size: 1.2rem; color: var(--gold); margin-bottom: 8px; }
