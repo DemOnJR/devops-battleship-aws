@@ -134,9 +134,10 @@ function randomQuote(cat) {
 // All game state is stored in Redis so both app instances share it.
 // Keys: game:{gameId} = JSON game object
 //       player:{playerId} = gameId (maps player to their game)
-//       waiting = JSON waiting player info
+//       lobby:{playerId} = JSON { playerId, name, socketId, timestamp }
 
 const GAME_TTL = 3600; // 1 hour expiry for game data
+const LOBBY_TTL = 300; // 5 min expiry for lobby entries
 
 async function getGame(gameId) {
   const data = await redis.get(`game:${gameId}`);
@@ -145,7 +146,6 @@ async function getGame(gameId) {
 
 async function saveGame(game) {
   await redis.set(`game:${game.id}`, JSON.stringify(game), 'EX', GAME_TTL);
-  // Also map each player to this game
   for (const pid of game.playerOrder) {
     await redis.set(`player:${pid}`, game.id, 'EX', GAME_TTL);
   }
@@ -161,17 +161,33 @@ async function deleteGame(gameId) {
   await redis.del(`game:${gameId}`);
 }
 
-async function getWaiting() {
-  const data = await redis.get('waiting');
-  return data ? JSON.parse(data) : null;
+// Lobby: list of waiting players
+async function addToLobby(playerId, name, socketId) {
+  await redis.set(`lobby:${playerId}`, JSON.stringify({ playerId, name, socketId, timestamp: Date.now() }), 'EX', LOBBY_TTL);
+  broadcastLobby();
 }
 
-async function setWaiting(data) {
-  if (data) {
-    await redis.set('waiting', JSON.stringify(data), 'EX', 300); // 5 min expiry
-  } else {
-    await redis.del('waiting');
-  }
+async function removeFromLobby(playerId) {
+  await redis.del(`lobby:${playerId}`);
+  broadcastLobby();
+}
+
+async function getLobbyList() {
+  const keys = await redis.keys('lobby:*');
+  if (keys.length === 0) return [];
+  const pipeline = redis.pipeline();
+  keys.forEach(k => pipeline.get(k));
+  const results = await pipeline.exec();
+  return results
+    .map(([err, data]) => (err || !data) ? null : JSON.parse(data))
+    .filter(Boolean)
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function broadcastLobby() {
+  const list = await getLobbyList();
+  const onlineCount = (await io.fetchSockets()).length;
+  io.emit('lobbyUpdate', { players: list.map(p => ({ playerId: p.playerId, name: p.name })), online: onlineCount });
 }
 
 function createGame(gameId) {
@@ -280,12 +296,57 @@ function clearDisconnectTimer(gameId, playerId) {
   if (timer) { clearTimeout(timer); disconnectTimers.delete(key); }
 }
 
+// ─── Match two players into a game ──────────────────────────
+async function matchPlayers(waitingPlayer, joiningPlayer, joiningSocket) {
+  const gameId = uuidv4().slice(0, 8);
+  const game = createGame(gameId);
+  game.players[waitingPlayer.playerId] = createPlayerData(waitingPlayer.playerId, waitingPlayer.name);
+  game.players[joiningPlayer.playerId] = createPlayerData(joiningPlayer.playerId, joiningPlayer.name);
+  game.playerOrder = [waitingPlayer.playerId, joiningPlayer.playerId];
+  game.phase = 'placing';
+  await saveGame(game);
+
+  // Remove both from lobby
+  await removeFromLobby(waitingPlayer.playerId);
+  await removeFromLobby(joiningPlayer.playerId);
+
+  // Set up joining player's socket
+  joiningSocket.join(gameId);
+  joiningSocket.gameId = gameId;
+  joiningSocket.playerId = joiningPlayer.playerId;
+
+  const p1 = game.players[waitingPlayer.playerId], p2 = game.players[joiningPlayer.playerId];
+
+  // Notify waiting player via their socket ID
+  if (waitingPlayer.socketId) {
+    io.to(waitingPlayer.socketId).emit('gameJoined', { gameId, playerId: waitingPlayer.playerId, opponentName: p2.name });
+    const waitingSockets = await io.in(waitingPlayer.socketId).fetchSockets();
+    for (const ws of waitingSockets) {
+      ws.join(gameId);
+      ws.gameId = gameId;
+      ws.playerId = waitingPlayer.playerId;
+    }
+  }
+
+  joiningSocket.emit('gameJoined', { gameId, playerId: joiningPlayer.playerId, opponentName: p1.name });
+  io.to(gameId).emit('phaseChange', { phase: 'placing' });
+  const jackMsg = { text: randomQuote('gameStart') };
+  io.to(gameId).emit('jackMessage', jackMsg);
+  addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+  await saveGame(game);
+}
+
 // ─── Socket.IO Events ──────────────────────────────────────
 io.on('connection', (socket) => {
   let playerId = null;
 
-  socket.on('register', (data) => {
+  socket.on('register', async (data) => {
     playerId = data.playerId;
+    // Send current lobby state to newly connected player
+    const list = await getLobbyList();
+    const onlineCount = (await io.fetchSockets()).length;
+    socket.emit('lobbyUpdate', { players: list.map(p => ({ playerId: p.playerId, name: p.name })), online: onlineCount });
+    broadcastLobby(); // update online count for everyone
   });
 
   socket.on('reconnect_game', async (data) => {
@@ -358,57 +419,33 @@ io.on('connection', (socket) => {
 
   socket.on('findRandom', async (data) => {
     playerId = data.playerId || playerId;
-    const waiting = await getWaiting();
+    const lobby = await getLobbyList();
+    // Find first player in lobby that isn't us
+    const opponent = lobby.find(p => p.playerId !== playerId);
 
-    if (waiting && waiting.playerId !== playerId) {
-      // Check if waiting player's socket is still connected somewhere
-      const gameId = uuidv4().slice(0, 8);
-      const game = createGame(gameId);
-      game.players[waiting.playerId] = createPlayerData(waiting.playerId, waiting.name);
-      game.players[playerId] = createPlayerData(playerId, data.name);
-      game.playerOrder = [waiting.playerId, playerId];
-      game.phase = 'placing';
-      await saveGame(game);
-      await setWaiting(null);
-
-      // Join rooms - the waiting player needs to be notified via Redis adapter
-      socket.join(gameId);
-      socket.gameId = gameId;
-      socket.playerId = playerId;
-
-      const p1 = game.players[waiting.playerId], p2 = game.players[playerId];
-
-      // Emit to waiting player via their socket ID stored in Redis
-      const waitingSocketId = waiting.socketId;
-      if (waitingSocketId) {
-        io.to(waitingSocketId).emit('gameJoined', { gameId, playerId: waiting.playerId, opponentName: p2.name });
-        // Make the waiting player's socket join the game room
-        const waitingSockets = await io.in(waitingSocketId).fetchSockets();
-        for (const ws of waitingSockets) {
-          ws.join(gameId);
-          ws.gameId = gameId;
-          ws.playerId = waiting.playerId;
-        }
-      }
-
-      socket.emit('gameJoined', { gameId, playerId, opponentName: p1.name });
-      io.to(gameId).emit('phaseChange', { phase: 'placing' });
-      const jackMsg = { text: randomQuote('gameStart') };
-      io.to(gameId).emit('jackMessage', jackMsg);
-      addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-      await saveGame(game);
+    if (opponent) {
+      await matchPlayers(opponent, { playerId, name: data.name, socketId: socket.id }, socket);
     } else {
-      await setWaiting({ playerId, name: data.name, socketId: socket.id });
+      // No one to match with - add to lobby and wait
+      await addToLobby(playerId, data.name, socket.id);
       socket.emit('waiting', { message: 'Looking for opponent...' });
     }
   });
 
+  // Challenge a specific player from the lobby
+  socket.on('challengePlayer', async (data) => {
+    playerId = data.playerId || playerId;
+    const targetId = data.targetPlayerId;
+    // Get target from lobby
+    const targetData = await redis.get(`lobby:${targetId}`);
+    if (!targetData) { socket.emit('error', { message: 'That pirate already set sail!' }); return; }
+    const target = JSON.parse(targetData);
+    await matchPlayers(target, { playerId, name: data.name, socketId: socket.id }, socket);
+  });
+
   socket.on('cancelSearch', async () => {
-    const waiting = await getWaiting();
-    if (waiting && waiting.playerId === playerId) {
-      await setWaiting(null);
-      socket.emit('searchCancelled');
-    }
+    await removeFromLobby(playerId);
+    socket.emit('searchCancelled');
   });
 
   socket.on('placeShips', async (data) => {
@@ -512,9 +549,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    const waiting = await getWaiting();
-    if (waiting && waiting.playerId === playerId) {
-      await setWaiting(null);
+    // Remove from lobby if they were waiting
+    if (playerId) {
+      await removeFromLobby(playerId);
     }
 
     if (socket.gameId && socket.playerId) {
@@ -551,6 +588,9 @@ setInterval(async () => {
     }
   } while (cursor !== '0');
 }, 30 * 60 * 1000);
+
+// Broadcast lobby/online count every 10 seconds
+setInterval(() => broadcastLobby(), 10000);
 
 app.get('/health', async (req, res) => {
   try {

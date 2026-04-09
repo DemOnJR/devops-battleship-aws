@@ -92,6 +92,37 @@ function startBgOnInteraction() {
 }
 document.addEventListener('click', startBgOnInteraction, { once: true });
 
+// ─── Lobby ─────────────────────────────────────────────────────
+socket.on('lobbyUpdate', (data) => {
+  const list = document.getElementById('lobby-list');
+  const countEl = document.getElementById('online-count');
+  countEl.textContent = 'Online: ' + data.online;
+  if (data.players.length === 0) {
+    list.innerHTML = '<p class="lobby-empty">No pirates waiting... be the first!</p>';
+    return;
+  }
+  list.innerHTML = '';
+  data.players.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'lobby-player' + (p.playerId === myId ? ' is-me' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'player-name';
+    nameSpan.textContent = p.name;
+    row.appendChild(nameSpan);
+    if (p.playerId !== myId) {
+      const btn = document.createElement('button');
+      btn.className = 'lobby-challenge-btn';
+      btn.textContent = '\u2694 Challenge';
+      btn.addEventListener('click', () => {
+        myName = getName();
+        socket.emit('challengePlayer', { name: myName, playerId: myId, targetPlayerId: p.playerId });
+      });
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
+  });
+});
+
 // ─── Menu Buttons ──────────────────────────────────────────────
 document.getElementById('btn-create').addEventListener('click', () => { myName = getName(); socket.emit('createGame', { name: myName, playerId: myId }); });
 document.getElementById('btn-random').addEventListener('click', () => { myName = getName(); socket.emit('findRandom', { name: myName, playerId: myId }); document.getElementById('waiting-section').classList.remove('hidden'); document.getElementById('btn-random').disabled = true; document.getElementById('btn-create').disabled = true; });
@@ -103,9 +134,6 @@ document.getElementById('btn-play-again').addEventListener('click', () => { clea
 socket.on('gameCreated', (data) => { gameId = data.gameId; myId = data.playerId; saveSession(gameId, myId); document.getElementById('invite-link').value = window.location.origin + '?join=' + gameId; document.getElementById('invite-section').classList.remove('hidden'); document.getElementById('btn-create').disabled = true; document.getElementById('btn-random').disabled = true; });
 socket.on('searchCancelled', () => { document.getElementById('waiting-section').classList.add('hidden'); document.getElementById('btn-random').disabled = false; document.getElementById('btn-create').disabled = false; });
 socket.on('gameJoined', (data) => { gameId = data.gameId; myId = data.playerId; opponentName = data.opponentName; saveSession(gameId, myId); document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); });
-socket.on('gameJoined_broadcast', (data) => {
-  if (data.players[myId]) { gameId = data.gameId; opponentName = data.players[myId].opponentName; saveSession(gameId, myId); document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); document.getElementById('waiting-section').classList.add('hidden'); }
-});
 socket.on('opponentJoined', (data) => { opponentName = data.opponentName; document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); });
 socket.on('error', (data) => { const el = document.getElementById('error-message'); el.textContent = data.message; el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 5000); });
 

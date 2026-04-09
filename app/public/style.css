@@ -58,6 +58,24 @@ body {
 .waiting-text { color: var(--gold); font-style: italic; margin: 10px 0; }
 .loading-ship { font-size: 2rem; animation: sail 2s ease-in-out infinite; display: inline-block; }
 @keyframes sail { 0%, 100% { transform: translateX(-10px) rotate(-3deg); } 50% { transform: translateX(10px) rotate(3deg); } }
+.lobby-section { margin-top: 25px; padding: 20px; background: var(--bg-medium); border: 1px solid var(--wood-2); border-radius: 8px; }
+.lobby-section h3 { font-family: 'Pirata One', cursive; color: var(--gold); margin: 0 0 12px 0; font-size: 1.3rem; }
+.lobby-list { max-height: 200px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--wood-2) var(--bg-dark); }
+.lobby-list::-webkit-scrollbar { width: 8px; }
+.lobby-list::-webkit-scrollbar-track { background: var(--bg-dark); border-radius: 4px; }
+.lobby-list::-webkit-scrollbar-thumb { background: var(--wood-2); border-radius: 4px; }
+.lobby-empty { color: var(--text-muted); font-style: italic; font-size: 0.9rem; margin: 8px 0; }
+.lobby-player { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; margin: 4px 0; background: var(--bg-dark); border: 1px solid var(--wood-1); border-radius: 6px; transition: border-color 0.2s; }
+.lobby-player:hover { border-color: var(--gold); }
+.lobby-player .player-name { color: var(--text-light); font-family: 'MedievalSharp', cursive; font-size: 1rem; }
+.lobby-player .player-name::before { content: '\u2620 '; color: var(--gold); }
+.lobby-player .lobby-challenge-btn { padding: 4px 12px; font-family: 'MedievalSharp', cursive; font-size: 0.85rem; background: linear-gradient(180deg, var(--wood-2), var(--wood-1)); border: 1px solid var(--gold); color: var(--gold); border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+.lobby-player .lobby-challenge-btn:hover { background: var(--gold); color: var(--bg-dark); }
+.lobby-player.is-me { border-color: var(--green); opacity: 0.7; }
+.lobby-player.is-me .lobby-challenge-btn { display: none; }
+.lobby-player.is-me .player-name::after { content: ' (You)'; color: var(--green); font-size: 0.8rem; }
+.online-count { margin-top: 10px; font-size: 0.85rem; color: var(--text-muted); text-align: right; }
+.online-count::before { content: '\u{1F7E2} '; }
 .error-message { margin-top: 15px; padding: 12px; background: rgba(192,57,43,0.3); border: 1px solid var(--red); border-radius: 6px; color: var(--red-bright); }
 .placement-container { text-align: center; max-width: 850px; width: 100%; }
 .placement-container h2 { font-family: 'Pirata One', cursive; font-size: 2rem; color: var(--gold); margin-bottom: 5px; }
