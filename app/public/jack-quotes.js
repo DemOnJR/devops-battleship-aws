@@ -1,0 +1,1 @@
+const JACK_AVATAR = '\u{1F3F4}\u200D\u2620\uFE0F';

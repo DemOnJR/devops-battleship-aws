@@ -1,0 +1,110 @@
+# ═══════════════════════════════════════════════════════════════
+# CI/CD Pipeline - Build, Push to Docker Hub, Deploy to AWS EC2
+# ═══════════════════════════════════════════════════════════════
+# Triggered on push to main branch.
+#
+# Flow:
+#   1. Build Docker image from app/ directory
+#   2. Push to Docker Hub as pbdaemon/battleship:latest + :sha-xxxxx
+#   3. SSH into EC2 and pull the new image
+#   4. Rolling restart containers for zero downtime
+#
+# Required GitHub Secrets (set in repo Settings > Secrets):
+#   DOCKERHUB_USERNAME  - pbdaemon
+#   DOCKERHUB_TOKEN     - Docker Hub access token (not password)
+#   EC2_SSH_KEY         - Private key (.pem) from Terraform output
+#   EC2_HOST            - Elastic IP of EC2 instance
+#   VAULT_TOKEN         - HashiCorp Vault token
+#   VAULT_URL           - https://vault.pbcv.dev
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+      - '.github/workflows/**'
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: |
+            pbdaemon/battleship:latest
+            pbdaemon/battleship:sha-${{ github.sha }}
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      # Fetch CF_TUNNEL_TOKEN from HashiCorp Vault
+      - name: Fetch secrets from Vault
+        id: vault
+        run: |
+          RESPONSE=$(curl -s \
+            --header "X-Vault-Token: ${{ secrets.VAULT_TOKEN }}" \
+            --request GET \
+            "${{ secrets.VAULT_URL }}/v1/kv/data/AWS")
+          CF_TOKEN=$(echo "$RESPONSE" | jq -r '.data.data.CF_TUNNEL_TOKEN')
+          echo "::add-mask::$CF_TOKEN"
+          echo "cf_token=$CF_TOKEN" >> "$GITHUB_OUTPUT"
+
+      # SSH into EC2 and deploy
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /opt/battleship
+
+            # Pull latest image
+            docker pull pbdaemon/battleship:latest
+
+            # Update .env with CF tunnel token from Vault
+            echo "CF_TUNNEL_TOKEN=${{ steps.vault.outputs.cf_token }}" > .env
+
+            # Rolling restart: restart one app at a time for zero downtime
+            # 1. Restart app-1, wait for it to be healthy
+            docker compose up -d --no-deps app-1
+            sleep 10
+
+            # 2. Restart app-2
+            docker compose up -d --no-deps app-2
+            sleep 10
+
+            # 3. Restart nginx to pick up any config changes
+            docker compose up -d --no-deps nginx
+
+            # 4. Ensure cloudflared is running
+            docker compose up -d --no-deps cloudflared
+
+            # Verify
+            docker compose ps

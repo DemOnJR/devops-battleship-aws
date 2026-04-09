@@ -1,0 +1,141 @@
+:root {
+  --bg-dark: #1a0f0a; --bg-medium: #2a1a10; --bg-light: #3d2b1f;
+  --gold: #d4a843; --gold-bright: #f0c95c;
+  --red: #c0392b; --red-bright: #e74c3c; --green: #27ae60;
+  --blue-water: #1a3a4a; --blue-water-light: #2c5f6e; --blue-miss: #3498db;
+  --text-light: #f5e6d0; --text-muted: #a89480;
+  --wood-1: #5c3a21; --wood-2: #7a4d2e;
+  --ship-color: #4a3520; --ship-placed: #6d4c30;
+  --cell-hover: rgba(212, 168, 67, 0.3); --explosion: #ff6b35;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'MedievalSharp', cursive, serif; background-color: var(--bg-dark);
+  background-image: radial-gradient(ellipse at 20% 50%, rgba(42,26,16,0.8) 0%, transparent 70%),
+    radial-gradient(ellipse at 80% 50%, rgba(42,26,16,0.6) 0%, transparent 70%);
+  color: var(--text-light); min-height: 100vh; overflow-x: hidden;
+}
+.screen { display: none; min-height: 100vh; padding: 20px; }
+.screen.active { display: flex; justify-content: center; align-items: center; }
+.menu-container { text-align: center; max-width: 500px; width: 100%; }
+.game-title {
+  font-family: 'Pirata One', cursive; font-size: 4rem; color: var(--gold);
+  text-shadow: 0 0 10px rgba(212,168,67,0.5), 2px 2px 4px rgba(0,0,0,0.8);
+  letter-spacing: 4px; margin-bottom: 5px;
+}
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; margin-bottom: 10px; }
+.skull-divider { font-size: 2rem; margin: 15px 0; opacity: 0.6; }
+.name-input-section { margin: 25px 0; }
+.name-input-section label { display: block; margin-bottom: 8px; color: var(--gold); font-size: 1.1rem; }
+.name-input-section input {
+  width: 100%; padding: 12px 16px; font-family: 'MedievalSharp', cursive; font-size: 1.1rem;
+  background: var(--bg-medium); border: 2px solid var(--wood-2); color: var(--text-light);
+  border-radius: 6px; text-align: center; outline: none; transition: border-color 0.3s;
+}
+.name-input-section input:focus { border-color: var(--gold); }
+.name-input-section input::placeholder { color: var(--text-muted); opacity: 0.6; }
+.pirate-btn {
+  display: block; width: 100%; padding: 14px 20px; margin: 10px 0;
+  font-family: 'Pirata One', cursive; font-size: 1.3rem; color: var(--text-light);
+  background: linear-gradient(180deg, var(--wood-2), var(--wood-1));
+  border: 2px solid var(--gold); border-radius: 8px; cursor: pointer;
+  transition: all 0.3s; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+.pirate-btn:hover { background: linear-gradient(180deg, #8a5d3a, var(--wood-2)); border-color: var(--gold-bright); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(212,168,67,0.3); }
+.pirate-btn:active { transform: translateY(0); }
+.pirate-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.pirate-btn.small { font-size: 1rem; padding: 8px 16px; }
+.pirate-btn.danger { border-color: var(--red); }
+.pirate-btn.ready-btn { background: linear-gradient(180deg, #2d7a3a, #1e5c28); border-color: var(--green); margin-top: 20px; }
+.pirate-btn.ready-btn:hover:not(:disabled) { background: linear-gradient(180deg, #38944a, #2d7a3a); }
+.btn-icon { margin-right: 8px; }
+.invite-section, .waiting-section, .join-section { margin-top: 25px; padding: 20px; background: var(--bg-medium); border: 1px solid var(--wood-2); border-radius: 8px; }
+.hidden { display: none !important; }
+.invite-link-box { display: flex; margin: 10px 0; gap: 8px; }
+.invite-link-box input { flex: 1; padding: 10px; font-family: monospace; font-size: 0.9rem; background: var(--bg-dark); border: 1px solid var(--wood-2); color: var(--gold); border-radius: 4px; outline: none; }
+.copy-btn { padding: 10px 16px; font-family: 'MedievalSharp', cursive; background: var(--wood-2); border: 1px solid var(--gold); color: var(--text-light); border-radius: 4px; cursor: pointer; }
+.copy-btn:hover { background: var(--gold); color: var(--bg-dark); }
+.waiting-text { color: var(--gold); font-style: italic; margin: 10px 0; }
+.loading-ship { font-size: 2rem; animation: sail 2s ease-in-out infinite; display: inline-block; }
+@keyframes sail { 0%, 100% { transform: translateX(-10px) rotate(-3deg); } 50% { transform: translateX(10px) rotate(3deg); } }
+.error-message { margin-top: 15px; padding: 12px; background: rgba(192,57,43,0.3); border: 1px solid var(--red); border-radius: 6px; color: var(--red-bright); }
+.placement-container { text-align: center; max-width: 850px; width: 100%; }
+.placement-container h2 { font-family: 'Pirata One', cursive; font-size: 2rem; color: var(--gold); margin-bottom: 5px; }
+.opponent-info { color: var(--text-muted); margin-bottom: 5px; }
+.placement-instructions { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 15px; }
+.placement-instructions kbd { background: var(--bg-light); border: 1px solid var(--wood-2); border-radius: 3px; padding: 2px 6px; }
+.placement-layout { display: flex; gap: 30px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+.ship-selector { min-width: 200px; text-align: left; }
+.ship-selector h3 { color: var(--gold); margin-bottom: 10px; font-family: 'Pirata One', cursive; font-size: 1.3rem; }
+.ship-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; }
+.ship-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-medium); border: 2px solid var(--wood-2); border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.ship-item:hover { border-color: var(--gold); }
+.ship-item.selected { border-color: var(--gold-bright); background: var(--bg-light); box-shadow: 0 0 10px rgba(212,168,67,0.3); }
+.ship-item.placed { opacity: 0.5; border-color: var(--green); cursor: default; }
+.ship-blocks { display: flex; gap: 2px; }
+.ship-block { width: 18px; height: 18px; background: var(--ship-color); border: 1px solid var(--wood-2); border-radius: 2px; }
+.ship-item.placed .ship-block { background: var(--green); }
+.ship-name { font-size: 0.9rem; color: var(--text-light); }
+.rotation-hint { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 10px; }
+.board-section h3 { color: var(--gold); margin-bottom: 10px; font-family: 'Pirata One', cursive; font-size: 1.3rem; }
+.game-board {
+  display: grid; grid-template-columns: 30px repeat(10, 1fr); grid-template-rows: 30px repeat(10, 1fr);
+  gap: 1px; background: var(--wood-1); border: 3px solid var(--wood-2); border-radius: 4px;
+  width: 370px; height: 370px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.board-label { display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--gold); background: var(--bg-medium); font-weight: bold; }
+.board-corner { background: var(--bg-medium); }
+.cell { background: var(--blue-water); cursor: pointer; transition: all 0.2s; position: relative; display: flex; align-items: center; justify-content: center; }
+.cell:hover { background: var(--cell-hover); }
+.cell.ship { background: var(--ship-placed); }
+.cell.ship-preview { background: rgba(212,168,67,0.4); border: 1px dashed var(--gold); }
+.cell.ship-preview.invalid { background: rgba(192,57,43,0.4); border-color: var(--red); }
+.cell.hit { background: var(--explosion); animation: hitFlash 0.5s ease-out; }
+.cell.hit::after { content: '\2716'; font-size: 1.2rem; color: var(--red); font-weight: bold; }
+.cell.miss { background: var(--blue-water-light); }
+.cell.miss::after { content: '\2022'; font-size: 1.5rem; color: rgba(255,255,255,0.5); }
+.cell.sunk { background: #8b0000; }
+.cell.sunk::after { content: '\2716'; font-size: 1.2rem; color: #ff0000; font-weight: bold; }
+.cell.ship.hit { background: #cc3300; }
+.cell.ship.hit::after { content: '\2716'; font-size: 1.2rem; color: #ff4444; }
+@keyframes hitFlash { 0% { background: #fff; transform: scale(1.1); } 50% { background: var(--explosion); } 100% { transform: scale(1); } }
+.game-board.enemy .cell:not(.hit):not(.miss):hover { background: rgba(231,76,60,0.3); cursor: crosshair; }
+.game-board.friendly .cell { cursor: default; }
+.battle-container { max-width: 1200px; width: 100%; margin: 0 auto; }
+.battle-header { text-align: center; margin-bottom: 15px; }
+.battle-header h2 { font-family: 'Pirata One', cursive; font-size: 1.6rem; color: var(--gold); }
+.score-display { margin-top: 5px; font-size: 0.95rem; }
+.score { color: var(--text-muted); }
+.score-divider { margin: 0 10px; color: var(--wood-2); }
+.battle-layout { display: flex; gap: 15px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+.board-wrapper { text-align: center; }
+.board-wrapper h3 { font-family: 'Pirata One', cursive; font-size: 1.2rem; color: var(--gold); margin-bottom: 8px; }
+.board-hint { font-size: 0.8rem; color: var(--text-muted); font-family: 'MedievalSharp', cursive; }
+.ships-status { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; justify-content: center; max-width: 370px; }
+.ship-status-item { font-size: 0.75rem; padding: 3px 8px; background: var(--bg-medium); border: 1px solid var(--wood-2); border-radius: 4px; color: var(--text-muted); }
+.ship-status-item.sunk { border-color: var(--red); color: var(--red); text-decoration: line-through; }
+.chat-panel { width: 280px; min-width: 250px; display: flex; flex-direction: column; background: var(--bg-medium); border: 2px solid var(--wood-2); border-radius: 8px; overflow: hidden; }
+.chat-panel h3 { font-family: 'Pirata One', cursive; font-size: 1.1rem; color: var(--gold); padding: 10px; background: var(--bg-dark); text-align: center; }
+.chat-messages { flex: 1; height: 400px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.chat-msg { padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; line-height: 1.3; word-wrap: break-word; }
+.chat-msg.player { background: var(--bg-light); }
+.chat-msg.jack { background: rgba(212,168,67,0.15); border-left: 3px solid var(--gold); font-style: italic; }
+.chat-msg.system { background: rgba(52,152,219,0.15); border-left: 3px solid var(--blue-miss); font-size: 0.8rem; color: var(--text-muted); }
+.chat-msg .sender { font-weight: bold; color: var(--gold); margin-right: 6px; }
+.chat-msg.jack .sender { color: var(--gold-bright); }
+.chat-input-area { display: flex; border-top: 1px solid var(--wood-2); }
+.chat-input-area input { flex: 1; padding: 10px; font-family: 'MedievalSharp', cursive; font-size: 0.9rem; background: var(--bg-dark); border: none; color: var(--text-light); outline: none; }
+.chat-input-area input::placeholder { color: var(--text-muted); opacity: 0.5; }
+.send-btn { padding: 10px 14px; background: var(--wood-2); border: none; color: var(--gold); cursor: pointer; font-size: 1.1rem; }
+.send-btn:hover { background: var(--gold); color: var(--bg-dark); }
+.gameover-container { text-align: center; max-width: 500px; }
+.gameover-container h1 { font-family: 'Pirata One', cursive; font-size: 3.5rem; margin-bottom: 15px; text-shadow: 0 0 20px rgba(212,168,67,0.5); }
+.gameover-container h1.victory { color: var(--gold); }
+.gameover-container h1.defeat { color: var(--red); }
+.gameover-container p { font-size: 1.2rem; color: var(--text-muted); margin-bottom: 10px; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--wood-2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+@media (max-width: 1100px) { .battle-layout { flex-direction: column; align-items: center; } .chat-panel { width: 370px; order: 3; } .chat-messages { height: 200px; } }
+@media (max-width: 500px) { .game-title { font-size: 2.5rem; } .game-board { width: 310px; height: 310px; } .chat-panel { width: 310px; } }

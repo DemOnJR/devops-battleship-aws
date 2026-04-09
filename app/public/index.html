@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Battleship - Pirates of the Caribbean</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=MedievalSharp&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="menu-screen" class="screen active">
+    <div class="menu-container">
+      <div class="title-section">
+        <h1 class="game-title">BATTLESHIP</h1>
+        <p class="subtitle">A Pirates of the Caribbean Experience</p>
+        <div class="skull-divider">&#9760;</div>
+      </div>
+      <div class="name-input-section">
+        <label for="player-name">Yer Pirate Name, Captain:</label>
+        <input type="text" id="player-name" placeholder="Captain Jack Sparrow" maxlength="20" autocomplete="off">
+      </div>
+      <div class="menu-buttons">
+        <button id="btn-create" class="pirate-btn"><span class="btn-icon">&#9876;</span> Create Game (Invite Link)</button>
+        <button id="btn-random" class="pirate-btn"><span class="btn-icon">&#127922;</span> Find Random Opponent</button>
+      </div>
+      <div id="invite-section" class="invite-section hidden">
+        <p>Share this link with yer matey:</p>
+        <div class="invite-link-box">
+          <input type="text" id="invite-link" readonly>
+          <button id="btn-copy" class="copy-btn">Copy</button>
+        </div>
+        <p class="waiting-text">Waiting for opponent to join...</p>
+        <div class="loading-ship">&#9973;</div>
+      </div>
+      <div id="waiting-section" class="waiting-section hidden">
+        <p class="waiting-text">Searching the seven seas for an opponent...</p>
+        <div class="loading-ship">&#9973;</div>
+        <button id="btn-cancel-search" class="pirate-btn small">Cancel Search</button>
+      </div>
+      <div id="join-section" class="join-section hidden">
+        <p>Joining game...</p>
+        <div class="loading-ship">&#9973;</div>
+      </div>
+      <div id="error-message" class="error-message hidden"></div>
+    </div>
+  </div>
+  <div id="placement-screen" class="screen">
+    <div class="placement-container">
+      <h2>Deploy Yer Fleet, Captain!</h2>
+      <p class="opponent-info">Battle against: <span id="opponent-name-placement">???</span></p>
+      <p class="placement-instructions">Click a ship below, then click on the board to place it. Press <kbd>R</kbd> to rotate.</p>
+      <div class="placement-layout">
+        <div class="ship-selector">
+          <h3>Yer Ships</h3>
+          <div id="ship-list" class="ship-list"></div>
+          <div class="rotation-hint"><kbd>R</kbd> to rotate | Click board to place</div>
+          <button id="btn-auto-place" class="pirate-btn small">Auto-Place (Lazy Pirate)</button>
+          <button id="btn-clear-ships" class="pirate-btn small danger">Clear All</button>
+          <button id="btn-ready" class="pirate-btn ready-btn" disabled>Ready for Battle!</button>
+        </div>
+        <div class="board-section">
+          <h3>Yer Waters</h3>
+          <div id="placement-board" class="game-board"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="battle-screen" class="screen">
+    <div class="battle-container">
+      <div class="battle-header">
+        <h2 id="turn-indicator">Preparing cannons...</h2>
+        <div class="score-display">
+          <span id="my-hits" class="score">Hits: 0</span>
+          <span class="score-divider">|</span>
+          <span id="enemy-hits" class="score">Enemy Hits: 0</span>
+        </div>
+      </div>
+      <div class="battle-layout">
+        <div class="board-wrapper">
+          <h3>Enemy Waters <span class="board-hint">(Click to fire!)</span></h3>
+          <div id="enemy-board" class="game-board enemy"></div>
+          <div id="enemy-ships-status" class="ships-status"></div>
+        </div>
+        <div class="chat-panel">
+          <h3>Ship's Log &#128220;</h3>
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input-area">
+            <input type="text" id="chat-input" placeholder="Send a message..." maxlength="200" autocomplete="off">
+            <button id="btn-send-chat" class="send-btn">&#9992;</button>
+          </div>
+        </div>
+        <div class="board-wrapper">
+          <h3>Yer Waters</h3>
+          <div id="my-board" class="game-board friendly"></div>
+          <div id="my-ships-status" class="ships-status"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="gameover-screen" class="screen">
+    <div class="gameover-container">
+      <h1 id="gameover-title">VICTORY!</h1>
+      <p id="gameover-message"></p>
+      <div class="skull-divider">&#9760;</div>
+      <button id="btn-play-again" class="pirate-btn">Play Again, Matey!</button>
+    </div>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="jack-quotes.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

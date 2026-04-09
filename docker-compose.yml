@@ -1,0 +1,58 @@
+# Docker Compose for production (runs on EC2)
+# Image is pulled from Docker Hub - built by GitHub Actions CI/CD
+services:
+  app-1:
+    image: pbdaemon/battleship:latest
+    environment:
+      - PORT=3000
+      - INSTANCE_ID=app-1
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - battleship-net
+
+  app-2:
+    image: pbdaemon/battleship:latest
+    environment:
+      - PORT=3000
+      - INSTANCE_ID=app-2
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - battleship-net
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app-1:
+        condition: service_healthy
+      app-2:
+        condition: service_healthy
+    restart: always
+    networks:
+      - battleship-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    restart: always
+    depends_on:
+      - nginx
+    networks:
+      - battleship-net
+
+networks:
+  battleship-net:
+    driver: bridge

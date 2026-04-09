@@ -1,0 +1,13 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/*.pem
+
+# Secrets - NEVER commit these
+.env
+terraform/terraform.tfvars
+
+# Node
+app/node_modules/
