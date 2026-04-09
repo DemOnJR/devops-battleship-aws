@@ -68,7 +68,7 @@ function addChatMessage(sender, text, type = 'player') {
   const container = document.getElementById('chat-messages');
   const msg = document.createElement('div'); msg.className = 'chat-msg ' + type;
   msg.innerHTML = sender ? '<span class="sender">' + escapeHtml(sender) + ':</span> ' + escapeHtml(text) : escapeHtml(text);
-  container.appendChild(msg); container.scrollTop = container.scrollHeight;
+  container.prepend(msg); container.scrollTop = 0;
 }
 
 function updateShipsStatus() {
