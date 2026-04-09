@@ -1,7 +1,9 @@
 # ═══════════════════════════════════════════════════════════════
 # BATTLESHIP GAME - AWS INFRASTRUCTURE
 # ═══════════════════════════════════════════════════════════════
-# Creates: SSH Key, Security Group, EC2 instance, Elastic IP
+# Creates: Security Group, EC2 instance
+# No public IP or SSH — all traffic goes through Cloudflare Tunnel
+# Deployments handled by Watchtower (auto-pulls new Docker images)
 # Cost: $0/month (free tier)
 #
 # Usage:
@@ -22,42 +24,11 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.0"
-    }
   }
 }
 
 provider "aws" {
   region = var.region
-}
-
-# ─── SSH KEY PAIR ────────────────────────────────────────────
-# Generates an SSH key pair so you can connect to the server.
-# Private key = stays on your machine (.pem file)
-# Public key = goes to AWS, placed on EC2 instance
-resource "tls_private_key" "battleship" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-# Register public key with AWS
-resource "aws_key_pair" "battleship" {
-  key_name   = var.key_name
-  public_key = tls_private_key.battleship.public_key_openssh
-  tags = { Name = "${var.project_name}-key", Project = var.project_name }
-}
-
-# Save private key locally (chmod 0400 = read-only, SSH requires this)
-resource "local_file" "private_key" {
-  content         = tls_private_key.battleship.private_key_pem
-  filename        = "${path.module}/${var.key_name}.pem"
-  file_permission = "0400"
 }
 
 # ─── DEFAULT VPC ─────────────────────────────────────────────
@@ -75,23 +46,8 @@ resource "aws_security_group" "battleship" {
   description = "Firewall for Battleship game server"
   vpc_id      = data.aws_vpc.default.id
 
-  # Allow SSH (port 22) from anywhere - for server management
-  ingress {
-    description = "SSH access - for managing the server"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Allow HTTP (port 80) - for testing directly via IP
-  ingress {
-    description = "HTTP - for testing and health checks"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # No inbound rules needed! Cloudflare Tunnel connects outbound.
+  # No SSH, no HTTP — the server is fully locked down.
 
   # Allow all outbound - server needs to pull Docker images, connect to CF, etc.
   egress {
@@ -132,7 +88,6 @@ data "aws_ami" "amazon_linux" {
 resource "aws_instance" "battleship" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  key_name               = aws_key_pair.battleship.key_name
   vpc_security_group_ids = [aws_security_group.battleship.id]
 
   # 8GB SSD storage (free tier gives 30GB)
@@ -155,11 +110,3 @@ resource "aws_instance" "battleship" {
   tags = { Name = "${var.project_name}-server", Project = var.project_name }
 }
 
-# ─── ELASTIC IP ──────────────────────────────────────────────
-# Static public IP - stays the same even if you restart the instance.
-# Free while attached to a running instance.
-resource "aws_eip" "battleship" {
-  instance = aws_instance.battleship.id
-  domain   = "vpc"
-  tags     = { Name = "${var.project_name}-eip", Project = var.project_name }
-}

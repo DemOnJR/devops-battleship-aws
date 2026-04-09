@@ -94,6 +94,18 @@ services:
       - nginx
     networks:
       - battleship-net
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=30
+      - WATCHTOWER_ROLLING_RESTART=true
+      - WATCHTOWER_INCLUDE_STOPPED=false
+    restart: always
+    networks:
+      - battleship-net
 networks:
   battleship-net:
     driver: bridge

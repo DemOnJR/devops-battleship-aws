@@ -22,12 +22,6 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-variable "key_name" {
-  description = "Name for the SSH key pair. You'll use this to SSH into the server."
-  type        = string
-  default     = "battleship-key"
-}
-
 variable "cf_tunnel_token" {
   description = "Cloudflare Tunnel token for connecting to CF network"
   type        = string
