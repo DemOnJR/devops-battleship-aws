@@ -116,7 +116,7 @@ body {
 .ship-status-item.sunk { border-color: var(--red); color: var(--red); text-decoration: line-through; }
 .chat-panel { width: 280px; min-width: 250px; display: flex; flex-direction: column; background: var(--bg-medium); border: 2px solid var(--wood-2); border-radius: 8px; overflow: hidden; }
 .chat-panel h3 { font-family: 'Pirata One', cursive; font-size: 1.1rem; color: var(--gold); padding: 10px; background: var(--bg-dark); text-align: center; }
-.chat-messages { flex: 1; height: 400px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.chat-messages { flex: 1; height: 400px; overflow-y: scroll; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .chat-msg { padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; line-height: 1.3; word-wrap: break-word; }
 .chat-msg.player { background: var(--bg-light); }
 .chat-msg.jack { background: rgba(212,168,67,0.15); border-left: 3px solid var(--gold); font-style: italic; }
