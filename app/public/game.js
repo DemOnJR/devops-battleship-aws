@@ -1,11 +1,11 @@
 const socket = io({ transports: ['polling', 'websocket'] });
 let myId = null, gameId = null, opponentName = '', myName = '', phase = 'menu', isMyTurn = false, myHits = 0, enemyHits = 0;
 const SHIPS = [
-  { id: 'carrier', name: 'Carrier', size: 5, placed: false, positions: [] },
-  { id: 'battleship', name: 'Battleship', size: 4, placed: false, positions: [] },
-  { id: 'cruiser', name: 'Cruiser', size: 3, placed: false, positions: [] },
-  { id: 'submarine', name: 'Submarine', size: 3, placed: false, positions: [] },
-  { id: 'destroyer', name: 'Destroyer', size: 2, placed: false, positions: [] },
+  { id: 'carrier', name: 'The Flying Dutchman', size: 5, placed: false, positions: [] },
+  { id: 'battleship', name: 'The Black Pearl', size: 4, placed: false, positions: [] },
+  { id: 'cruiser', name: "Queen Anne's Revenge", size: 3, placed: false, positions: [] },
+  { id: 'submarine', name: 'The Interceptor', size: 3, placed: false, positions: [] },
+  { id: 'destroyer', name: 'Jolly Mon', size: 2, placed: false, positions: [] },
 ];
 let selectedShipIndex = -1, isHorizontal = true;
 let placementBoard = Array(10).fill(null).map(() => Array(10).fill(null));
@@ -128,6 +128,7 @@ document.getElementById('btn-create').addEventListener('click', () => { myName =
 document.getElementById('btn-random').addEventListener('click', () => { myName = getName(); socket.emit('findRandom', { name: myName, playerId: myId }); document.getElementById('waiting-section').classList.remove('hidden'); document.getElementById('btn-random').disabled = true; document.getElementById('btn-create').disabled = true; });
 document.getElementById('btn-cancel-search').addEventListener('click', () => { socket.emit('cancelSearch'); document.getElementById('waiting-section').classList.add('hidden'); document.getElementById('btn-random').disabled = false; document.getElementById('btn-create').disabled = false; });
 document.getElementById('btn-copy').addEventListener('click', () => { const input = document.getElementById('invite-link'); input.select(); navigator.clipboard.writeText(input.value).then(() => { const btn = document.getElementById('btn-copy'); btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); }); });
+document.getElementById('btn-cancel-invite').addEventListener('click', () => { socket.emit('cancelInvite'); document.getElementById('invite-section').classList.add('hidden'); document.getElementById('btn-create').disabled = false; document.getElementById('btn-random').disabled = false; clearSession(); gameId = null; });
 document.getElementById('btn-play-again').addEventListener('click', () => { clearSession(); window.location.href = window.location.origin; });
 document.getElementById('btn-leave-placement').addEventListener('click', () => { if (confirm('Abandon ship? Yer opponent will win!')) { socket.emit('leaveGame'); clearSession(); window.location.href = window.location.origin; } });
 document.getElementById('btn-leave-battle').addEventListener('click', () => { if (confirm('Abandon ship? Yer opponent will win!')) { socket.emit('leaveGame'); clearSession(); window.location.href = window.location.origin; } });

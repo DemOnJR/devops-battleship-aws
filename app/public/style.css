@@ -75,7 +75,7 @@ body {
 .lobby-player.is-me .lobby-challenge-btn { display: none; }
 .lobby-player.is-me .player-name::after { content: ' (You)'; color: var(--green); font-size: 0.8rem; }
 .online-count { margin-top: 10px; font-size: 0.85rem; color: var(--text-muted); text-align: right; }
-.online-count::before { content: '\u{1F7E2} '; }
+.online-count::before { content: '\25CF '; color: var(--green); }
 .error-message { margin-top: 15px; padding: 12px; background: rgba(192,57,43,0.3); border: 1px solid var(--red); border-radius: 6px; color: var(--red-bright); }
 .placement-container { text-align: center; max-width: 850px; width: 100%; }
 .placement-container h2 { font-family: 'Pirata One', cursive; font-size: 2rem; color: var(--gold); margin-bottom: 5px; }

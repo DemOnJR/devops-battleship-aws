@@ -26,11 +26,11 @@ io.adapter(createAdapter(pubClient, subClient));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const SHIP_TYPES = [
-  { name: 'Carrier',    size: 5, id: 'carrier' },
-  { name: 'Battleship', size: 4, id: 'battleship' },
-  { name: 'Cruiser',    size: 3, id: 'cruiser' },
-  { name: 'Submarine',  size: 3, id: 'submarine' },
-  { name: 'Destroyer',  size: 2, id: 'destroyer' },
+  { name: 'The Flying Dutchman', size: 5, id: 'carrier' },
+  { name: 'The Black Pearl',     size: 4, id: 'battleship' },
+  { name: 'Queen Anne\'s Revenge', size: 3, id: 'cruiser' },
+  { name: 'The Interceptor',     size: 3, id: 'submarine' },
+  { name: 'Jolly Mon',           size: 2, id: 'destroyer' },
 ];
 
 const JACK_QUOTES = {
@@ -446,6 +446,14 @@ io.on('connection', (socket) => {
   socket.on('cancelSearch', async () => {
     await removeFromLobby(playerId);
     socket.emit('searchCancelled');
+  });
+
+  socket.on('cancelInvite', async () => {
+    if (socket.gameId) {
+      await deleteGame(socket.gameId);
+      socket.leave(socket.gameId);
+      socket.gameId = null;
+    }
   });
 
   socket.on('placeShips', async (data) => {
