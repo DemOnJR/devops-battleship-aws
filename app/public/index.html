@@ -106,6 +106,28 @@
       <button id="btn-play-again" class="pirate-btn">Play Again, Matey!</button>
     </div>
   </div>
+  <!-- Pirate SVG Sprites -->
+  <object data="pirates.svg" type="image/svg+xml" style="display:none" aria-hidden="true"></object>
+
+  <!-- Captain Jack Sparrow - appears near chat -->
+  <div id="jack-character" class="pirate-character jack-idle">
+    <svg viewBox="0 0 120 200"><use href="pirates.svg#jack-sparrow"/></svg>
+  </div>
+
+  <!-- Flying Parrot -->
+  <div id="parrot-character" class="pirate-character parrot-fly">
+    <svg viewBox="0 0 80 80"><use href="pirates.svg#parrot"/></svg>
+  </div>
+
+  <!-- Monkey -->
+  <div id="monkey-character" class="pirate-character monkey-swing">
+    <svg viewBox="0 0 90 100"><use href="pirates.svg#monkey"/></svg>
+  </div>
+
+  <!-- Sound Toggle Button -->
+  <button id="btn-sound-toggle" class="sound-toggle" title="Toggle Sound">&#128266;</button>
+
+  <script src="sounds.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="jack-quotes.js"></script>
   <script src="game.js"></script>

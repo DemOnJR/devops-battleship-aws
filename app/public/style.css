@@ -137,5 +137,102 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg-dark); }
 ::-webkit-scrollbar-thumb { background: var(--wood-2); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+/* ─── Sound Toggle ──────────────────────────────────────────── */
+.sound-toggle {
+  position: fixed; top: 12px; right: 12px; z-index: 100;
+  width: 42px; height: 42px; border-radius: 50%;
+  background: var(--bg-medium); border: 2px solid var(--wood-2);
+  color: var(--gold); font-size: 1.3rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.3s; opacity: 0.8;
+}
+.sound-toggle:hover { border-color: var(--gold); opacity: 1; transform: scale(1.1); }
+.sound-toggle.muted { opacity: 0.4; border-color: var(--red); }
+
+/* ─── Pirate Characters ─────────────────────────────────────── */
+.pirate-character { position: fixed; z-index: 50; pointer-events: none; }
+
+/* Captain Jack - bottom left, idle sway */
+#jack-character {
+  bottom: 10px; left: 10px; width: 90px; height: 150px;
+  animation: jackSway 4s ease-in-out infinite;
+  opacity: 0.9; filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.5));
+}
+@keyframes jackSway {
+  0%, 100% { transform: rotate(-2deg) translateY(0); }
+  25% { transform: rotate(1deg) translateY(-3px); }
+  50% { transform: rotate(-1deg) translateY(-1px); }
+  75% { transform: rotate(2deg) translateY(-4px); }
+}
+/* Jack reacts on hit/miss */
+#jack-character.jack-excited { animation: jackExcited 0.6s ease-in-out 3; }
+@keyframes jackExcited {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-15px) rotate(-8deg); }
+  50% { transform: translateY(-5px) rotate(5deg); }
+  75% { transform: translateY(-10px) rotate(-3deg); }
+}
+
+/* Parrot - flies around the screen */
+#parrot-character {
+  width: 50px; height: 50px; top: -60px; left: -60px;
+  animation: parrotFly 18s linear infinite;
+  opacity: 0.85; filter: drop-shadow(1px 2px 3px rgba(0,0,0,0.4));
+}
+@keyframes parrotFly {
+  0%   { top: 20%; left: -60px; transform: scaleX(1) rotate(-5deg); }
+  15%  { top: 8%;  left: 30%;   transform: scaleX(1) rotate(5deg); }
+  25%  { top: 15%; left: 55%;   transform: scaleX(1) rotate(-8deg); }
+  35%  { top: 5%;  left: 80%;   transform: scaleX(1) rotate(3deg); }
+  40%  { top: 12%; left: 95%;   transform: scaleX(1) rotate(0deg); }
+  /* Turn around */
+  41%  { top: 12%; left: 95%;   transform: scaleX(-1) rotate(0deg); }
+  55%  { top: 25%; left: 65%;   transform: scaleX(-1) rotate(6deg); }
+  65%  { top: 10%; left: 40%;   transform: scaleX(-1) rotate(-5deg); }
+  75%  { top: 20%; left: 15%;   transform: scaleX(-1) rotate(8deg); }
+  85%  { top: 8%;  left: -5%;   transform: scaleX(-1) rotate(-3deg); }
+  90%  { top: 15%; left: -8%;   transform: scaleX(-1) rotate(0deg); }
+  /* Turn back */
+  91%  { top: 15%; left: -8%;   transform: scaleX(1) rotate(0deg); }
+  100% { top: 20%; left: -60px; transform: scaleX(1) rotate(-5deg); }
+}
+/* Wing flap overlay */
+#parrot-character svg {
+  animation: wingFlap 0.3s ease-in-out infinite alternate;
+}
+@keyframes wingFlap {
+  0% { transform: scaleY(1); }
+  100% { transform: scaleY(0.95) translateY(1px); }
+}
+
+/* Monkey - bottom right, bouncing and swinging */
+#monkey-character {
+  bottom: 10px; right: 10px; width: 70px; height: 78px;
+  animation: monkeyBounce 3s ease-in-out infinite;
+  opacity: 0.9; filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.5));
+}
+@keyframes monkeyBounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  20% { transform: translateY(-12px) rotate(5deg); }
+  40% { transform: translateY(-3px) rotate(-3deg); }
+  60% { transform: translateY(-18px) rotate(-5deg); }
+  80% { transform: translateY(-5px) rotate(3deg); }
+}
+/* Monkey gets excited on sunk ship */
+#monkey-character.monkey-excited { animation: monkeyFreakout 0.4s ease-in-out 5; }
+@keyframes monkeyFreakout {
+  0%, 100% { transform: translateY(0) rotate(0) scale(1); }
+  25% { transform: translateY(-25px) rotate(-15deg) scale(1.1); }
+  50% { transform: translateY(-10px) rotate(10deg) scale(1.05); }
+  75% { transform: translateY(-20px) rotate(-8deg) scale(1.1); }
+}
+
+/* Hide characters on small screens */
+@media (max-width: 768px) {
+  #jack-character { width: 60px; height: 100px; }
+  #monkey-character { width: 50px; height: 56px; }
+  #parrot-character { width: 35px; height: 35px; }
+}
+
 @media (max-width: 1100px) { .battle-layout { flex-direction: column; align-items: center; } .chat-panel { width: 370px; order: 3; } .chat-messages { height: 200px; } }
 @media (max-width: 500px) { .game-title { font-size: 2.5rem; } .game-board { width: 310px; height: 310px; } .chat-panel { width: 310px; } }
