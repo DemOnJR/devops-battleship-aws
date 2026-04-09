@@ -103,6 +103,9 @@ document.getElementById('btn-play-again').addEventListener('click', () => { clea
 socket.on('gameCreated', (data) => { gameId = data.gameId; myId = data.playerId; saveSession(gameId, myId); document.getElementById('invite-link').value = window.location.origin + '?join=' + gameId; document.getElementById('invite-section').classList.remove('hidden'); document.getElementById('btn-create').disabled = true; document.getElementById('btn-random').disabled = true; });
 socket.on('searchCancelled', () => { document.getElementById('waiting-section').classList.add('hidden'); document.getElementById('btn-random').disabled = false; document.getElementById('btn-create').disabled = false; });
 socket.on('gameJoined', (data) => { gameId = data.gameId; myId = data.playerId; opponentName = data.opponentName; saveSession(gameId, myId); document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); });
+socket.on('gameJoined_broadcast', (data) => {
+  if (data.players[myId]) { gameId = data.gameId; opponentName = data.players[myId].opponentName; saveSession(gameId, myId); document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); document.getElementById('waiting-section').classList.add('hidden'); }
+});
 socket.on('opponentJoined', (data) => { opponentName = data.opponentName; document.getElementById('opponent-name-placement').textContent = opponentName; initPlacement(); showScreen('placement'); SoundEngine.notify(); });
 socket.on('error', (data) => { const el = document.getElementById('error-message'); el.textContent = data.message; el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 5000); });
 

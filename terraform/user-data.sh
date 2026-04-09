@@ -46,12 +46,90 @@ NGINXEOF
 
 cat > /opt/battleship/docker-compose.yml << 'COMPOSEEOF'
 services:
+  redis-master:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --save 60 1 --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-master-data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - battleship-net
+  redis-replica:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --replicaof redis-master 6379 --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-replica-data:/data
+    restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - battleship-net
+  sentinel-1:
+    image: redis:7-alpine
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel failover-timeout mymaster 10000
+      sentinel parallel-syncs mymaster 1' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+    restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - battleship-net
+  sentinel-2:
+    image: redis:7-alpine
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel failover-timeout mymaster 10000
+      sentinel parallel-syncs mymaster 1' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+    restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - battleship-net
+  sentinel-3:
+    image: redis:7-alpine
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel failover-timeout mymaster 10000
+      sentinel parallel-syncs mymaster 1' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+    restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - battleship-net
   app-1:
     image: pbdaemon/battleship:latest
     environment:
       - PORT=3000
       - INSTANCE_ID=app-1
+      - REDIS_SENTINEL_HOSTS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+      - REDIS_MASTER_NAME=mymaster
     restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      sentinel-1:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 10s
@@ -64,7 +142,14 @@ services:
     environment:
       - PORT=3000
       - INSTANCE_ID=app-2
+      - REDIS_SENTINEL_HOSTS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+      - REDIS_MASTER_NAME=mymaster
     restart: always
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      sentinel-1:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 10s
@@ -106,6 +191,9 @@ services:
     restart: always
     networks:
       - battleship-net
+volumes:
+  redis-master-data:
+  redis-replica-data:
 networks:
   battleship-net:
     driver: bridge
