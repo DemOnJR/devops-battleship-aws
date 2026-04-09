@@ -2,54 +2,29 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
-const Redis = require('ioredis');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const Redis = require('ioredis');
 
 const app = express();
 const server = http.createServer(app);
+
+// Redis clients - one for pub, one for sub (required by adapter), one for data
+const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
+const pubClient = new Redis(REDIS_URL);
+const subClient = pubClient.duplicate();
+const redis = new Redis(REDIS_URL);
+
 const io = new Server(server, {
   cors: { origin: '*' },
   transports: ['polling', 'websocket'],
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-// ─── REDIS CONNECTION (Sentinel for failover) ──────────────
-const sentinelHosts = (process.env.REDIS_SENTINEL_HOSTS || 'sentinel-1:26379,sentinel-2:26379,sentinel-3:26379')
-  .split(',').map(h => {
-    const [host, port] = h.trim().split(':');
-    return { host, port: parseInt(port) };
-  });
-const masterName = process.env.REDIS_MASTER_NAME || 'mymaster';
-
-function createRedisClient() {
-  return new Redis({
-    sentinels: sentinelHosts,
-    name: masterName,
-    retryStrategy: (times) => Math.min(times * 200, 5000),
-    maxRetriesPerRequest: 3,
-  });
-}
-
-const redis = createRedisClient();
-const pubClient = createRedisClient();
-const subClient = createRedisClient();
-
-redis.on('error', (err) => console.error('Redis error:', err.message));
-redis.on('connect', () => console.log('Redis connected'));
-
-// Socket.IO Redis adapter — broadcasts events across app-1 and app-2
+// Socket.IO Redis adapter - shares events across app-1 and app-2
 io.adapter(createAdapter(pubClient, subClient));
 
-// ─── IN-MEMORY (per-instance only) ─────────────────────────
-// Sockets can't be serialized — this maps playerId to their socket on THIS instance
-const playerSockets = new Map();
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Idle timers are per-instance, we track which game we're timing
-const idleTimers = new Map();
-
-// ─── CONSTANTS ──────────────────────────────────────────────
 const SHIP_TYPES = [
   { name: 'Carrier',    size: 5, id: 'carrier' },
   { name: 'Battleship', size: 4, id: 'battleship' },
@@ -155,11 +130,13 @@ function randomQuote(cat) {
   return q[Math.floor(Math.random() * q.length)];
 }
 
-// ─── REDIS GAME STATE HELPERS ───────────────────────────────
-// All game state lives in Redis so both app instances share it
-// and it survives container restarts
+// ─── Redis helpers ──────────────────────────────────────────
+// All game state is stored in Redis so both app instances share it.
+// Keys: game:{gameId} = JSON game object
+//       player:{playerId} = gameId (maps player to their game)
+//       waiting = JSON waiting player info
 
-const GAME_TTL = 3600; // 1 hour
+const GAME_TTL = 3600; // 1 hour expiry for game data
 
 async function getGame(gameId) {
   const data = await redis.get(`game:${gameId}`);
@@ -168,55 +145,36 @@ async function getGame(gameId) {
 
 async function saveGame(game) {
   await redis.set(`game:${game.id}`, JSON.stringify(game), 'EX', GAME_TTL);
+  // Also map each player to this game
+  for (const pid of game.playerOrder) {
+    await redis.set(`player:${pid}`, game.id, 'EX', GAME_TTL);
+  }
 }
 
 async function deleteGame(gameId) {
+  const game = await getGame(gameId);
+  if (game) {
+    for (const pid of game.playerOrder) {
+      await redis.del(`player:${pid}`);
+    }
+  }
   await redis.del(`game:${gameId}`);
 }
 
-async function setPlayerGame(playerId, gameId) {
-  await redis.set(`player:${playerId}`, gameId, 'EX', GAME_TTL);
-}
-
-async function getPlayerGame(playerId) {
-  return await redis.get(`player:${playerId}`);
-}
-
-async function deletePlayerGame(playerId) {
-  await redis.del(`player:${playerId}`);
-}
-
-// Waiting player for random matchmaking (stored in Redis so both instances see it)
-async function setWaitingPlayer(playerId, name) {
-  await redis.set('waiting_player', JSON.stringify({ playerId, name }), 'EX', 300);
-}
-
-async function getWaitingPlayer() {
-  const data = await redis.get('waiting_player');
+async function getWaiting() {
+  const data = await redis.get('waiting');
   return data ? JSON.parse(data) : null;
 }
 
-async function clearWaitingPlayer() {
-  await redis.del('waiting_player');
+async function setWaiting(data) {
+  if (data) {
+    await redis.set('waiting', JSON.stringify(data), 'EX', 300); // 5 min expiry
+  } else {
+    await redis.del('waiting');
+  }
 }
 
-// Disconnect tracking: store timestamp in Redis instead of setTimeout
-async function setDisconnectTime(playerId, gameId) {
-  await redis.set(`disconnect:${playerId}`, JSON.stringify({ gameId, time: Date.now() }), 'EX', 120);
-}
-
-async function getDisconnectTime(playerId) {
-  const data = await redis.get(`disconnect:${playerId}`);
-  return data ? JSON.parse(data) : null;
-}
-
-async function clearDisconnectTime(playerId) {
-  await redis.del(`disconnect:${playerId}`);
-}
-
-// ─── GAME LOGIC HELPERS ────────────────────────────────────
-
-function createGameObj(gameId) {
+function createGame(gameId) {
   return {
     id: gameId,
     players: {},
@@ -225,6 +183,7 @@ function createGameObj(gameId) {
     currentTurn: null,
     winner: null,
     chatLog: [],
+    disconnectTimestamps: {}, // playerId -> timestamp when disconnected
   };
 }
 
@@ -242,6 +201,11 @@ function createPlayerData(playerId, playerName) {
 
 function allShipsSunk(p) {
   return Object.values(p.ships).every(s => s.hits >= s.positions.length);
+}
+
+function addChatLog(game, sender, text, type) {
+  game.chatLog.push({ sender, text, type });
+  if (game.chatLog.length > 100) game.chatLog.shift();
 }
 
 function getStateForPlayer(game, playerId) {
@@ -274,10 +238,9 @@ function getStateForPlayer(game, playerId) {
   };
 }
 
-function addChatLog(game, sender, text, type) {
-  game.chatLog.push({ sender, text, type });
-  if (game.chatLog.length > 100) game.chatLog.shift();
-}
+// Idle timers are per-instance (not shared), but that's fine -
+// they just send a Jack quote, not critical state
+const idleTimers = new Map();
 
 function startIdleTimer(gameId) {
   clearIdleTimer(gameId);
@@ -294,391 +257,309 @@ function clearIdleTimer(gameId) {
   if (timer) { clearTimeout(timer); idleTimers.delete(gameId); }
 }
 
-// Check if a disconnected player has timed out (60 seconds)
-async function checkDisconnectTimeout(playerId, game) {
-  const dc = await getDisconnectTime(playerId);
-  if (dc && Date.now() - dc.time > 60000) {
-    clearIdleTimer(game.id);
-    io.to(game.id).emit('opponentLeft', { message: 'Opponent abandoned ship! You win!' });
-    io.to(game.id).emit('jackMessage', { text: "They've fled! Probably heard I was watching. Can't blame 'em, really." });
-    await deleteGame(game.id);
-    for (const pid of game.playerOrder) await deletePlayerGame(pid);
-    await clearDisconnectTime(playerId);
-    return true;
-  }
-  return false;
+// Disconnect timers - per instance, checks Redis state
+const disconnectTimers = new Map();
+
+function startDisconnectTimer(gameId, playerId) {
+  const key = `${gameId}:${playerId}`;
+  disconnectTimers.set(key, setTimeout(async () => {
+    const game = await getGame(gameId);
+    if (game && game.players[playerId] && !game.players[playerId].connected) {
+      clearIdleTimer(gameId);
+      io.to(gameId).emit('opponentLeft', { message: 'Opponent abandoned ship! You win!' });
+      io.to(gameId).emit('jackMessage', { text: "They've fled! Probably heard I was watching. Can't blame 'em, really." });
+      await deleteGame(gameId);
+    }
+    disconnectTimers.delete(key);
+  }, 60000));
 }
 
-// ─── SOCKET.IO EVENT HANDLERS ───────────────────────────────
+function clearDisconnectTimer(gameId, playerId) {
+  const key = `${gameId}:${playerId}`;
+  const timer = disconnectTimers.get(key);
+  if (timer) { clearTimeout(timer); disconnectTimers.delete(key); }
+}
 
+// ─── Socket.IO Events ──────────────────────────────────────
 io.on('connection', (socket) => {
   let playerId = null;
 
   socket.on('register', (data) => {
     playerId = data.playerId;
-    playerSockets.set(playerId, socket);
   });
 
   socket.on('reconnect_game', async (data) => {
-    try {
-      playerId = data.playerId;
-      playerSockets.set(playerId, socket);
-      const targetGameId = data.gameId;
+    playerId = data.playerId;
+    const targetGameId = data.gameId;
 
-      const game = await getGame(targetGameId);
-      if (!game || !game.players[playerId]) {
-        socket.emit('reconnect_failed');
-        return;
-      }
-
-      // Clear disconnect timer
-      await clearDisconnectTime(playerId);
-
-      game.players[playerId].connected = true;
-      await saveGame(game);
-
-      socket.join(game.id);
-      socket.gameId = game.id;
-      socket.playerId = playerId;
-
-      socket.emit('reconnect_state', getStateForPlayer(game, playerId));
-
-      const opId = game.playerOrder.find(pid => pid !== playerId);
-      if (opId) {
-        io.to(game.id).emit('opponentReconnected', { name: game.players[playerId].name });
-      }
-
-      const jackMsg = { text: randomQuote('reconnect') };
-      io.to(game.id).emit('jackMessage', jackMsg);
-      addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-      await saveGame(game);
-
-      if (game.phase === 'battle') startIdleTimer(game.id);
-    } catch (err) {
-      console.error('reconnect_game error:', err);
+    const game = await getGame(targetGameId);
+    if (!game || !game.players[playerId]) {
       socket.emit('reconnect_failed');
+      return;
     }
+
+    clearDisconnectTimer(targetGameId, playerId);
+    game.players[playerId].connected = true;
+    await saveGame(game);
+
+    socket.join(game.id);
+    socket.gameId = game.id;
+    socket.playerId = playerId;
+
+    socket.emit('reconnect_state', getStateForPlayer(game, playerId));
+
+    const opId = game.playerOrder.find(pid => pid !== playerId);
+    if (opId) {
+      io.to(game.id).emit('opponentReconnected', { name: game.players[playerId].name });
+    }
+
+    const jackMsg = { text: randomQuote('reconnect') };
+    io.to(game.id).emit('jackMessage', jackMsg);
+    addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+    await saveGame(game);
+
+    if (game.phase === 'battle') startIdleTimer(game.id);
   });
 
   socket.on('createGame', async (data) => {
-    try {
-      playerId = data.playerId || playerId;
-      playerSockets.set(playerId, socket);
-      const gameId = uuidv4().slice(0, 8);
-      const game = createGameObj(gameId);
-      game.players[playerId] = createPlayerData(playerId, data.name);
-      game.playerOrder.push(playerId);
-      await saveGame(game);
-      await setPlayerGame(playerId, gameId);
-      socket.join(gameId);
-      socket.gameId = gameId;
-      socket.playerId = playerId;
-      socket.emit('gameCreated', { gameId, playerId });
-    } catch (err) {
-      console.error('createGame error:', err);
-      socket.emit('error', { message: 'Failed to create game' });
-    }
+    playerId = data.playerId || playerId;
+    const gameId = uuidv4().slice(0, 8);
+    const game = createGame(gameId);
+    game.players[playerId] = createPlayerData(playerId, data.name);
+    game.playerOrder.push(playerId);
+    await saveGame(game);
+    socket.join(gameId);
+    socket.gameId = gameId;
+    socket.playerId = playerId;
+    socket.emit('gameCreated', { gameId, playerId });
   });
 
   socket.on('joinGame', async (data) => {
-    try {
-      playerId = data.playerId || playerId;
-      playerSockets.set(playerId, socket);
-      const game = await getGame(data.gameId);
-      if (!game) { socket.emit('error', { message: 'Game not found!' }); return; }
-      if (game.playerOrder.length >= 2) { socket.emit('error', { message: 'Game is full!' }); return; }
-      game.players[playerId] = createPlayerData(playerId, data.name);
-      game.playerOrder.push(playerId);
-      game.phase = 'placing';
-      await saveGame(game);
-      await setPlayerGame(playerId, data.gameId);
-      socket.join(data.gameId);
-      socket.gameId = data.gameId;
-      socket.playerId = playerId;
-      const p1 = game.players[game.playerOrder[0]], p2 = game.players[game.playerOrder[1]];
-      socket.emit('gameJoined', { gameId: data.gameId, playerId, opponentName: p1.name });
-      io.to(data.gameId).emit('opponentJoined', { opponentName: p2.name });
-      io.to(data.gameId).emit('phaseChange', { phase: 'placing' });
-      const jackMsg = { text: randomQuote('gameStart') };
-      io.to(data.gameId).emit('jackMessage', jackMsg);
-      addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-      await saveGame(game);
-    } catch (err) {
-      console.error('joinGame error:', err);
-      socket.emit('error', { message: 'Failed to join game' });
-    }
+    playerId = data.playerId || playerId;
+    const game = await getGame(data.gameId);
+    if (!game) { socket.emit('error', { message: 'Game not found!' }); return; }
+    if (game.playerOrder.length >= 2) { socket.emit('error', { message: 'Game is full!' }); return; }
+    game.players[playerId] = createPlayerData(playerId, data.name);
+    game.playerOrder.push(playerId);
+    game.phase = 'placing';
+    await saveGame(game);
+    socket.join(data.gameId);
+    socket.gameId = data.gameId;
+    socket.playerId = playerId;
+    const p1 = game.players[game.playerOrder[0]], p2 = game.players[game.playerOrder[1]];
+    socket.emit('gameJoined', { gameId: data.gameId, playerId, opponentName: p1.name });
+    io.to(data.gameId).emit('opponentJoined', { opponentName: p2.name });
+    io.to(data.gameId).emit('phaseChange', { phase: 'placing' });
+    const jackMsg = { text: randomQuote('gameStart') };
+    io.to(data.gameId).emit('jackMessage', jackMsg);
+    addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+    await saveGame(game);
   });
 
   socket.on('findRandom', async (data) => {
-    try {
-      playerId = data.playerId || playerId;
-      playerSockets.set(playerId, socket);
-      const waiting = await getWaitingPlayer();
+    playerId = data.playerId || playerId;
+    const waiting = await getWaiting();
 
-      if (waiting && waiting.playerId !== playerId) {
-        // Check if the waiting player is still connected on some instance
-        await clearWaitingPlayer();
-        const gameId = uuidv4().slice(0, 8);
-        const game = createGameObj(gameId);
-        game.players[waiting.playerId] = createPlayerData(waiting.playerId, waiting.name);
-        game.players[playerId] = createPlayerData(playerId, data.name);
-        game.playerOrder = [waiting.playerId, playerId];
-        game.phase = 'placing';
-        await saveGame(game);
-        await setPlayerGame(waiting.playerId, gameId);
-        await setPlayerGame(playerId, gameId);
+    if (waiting && waiting.playerId !== playerId) {
+      // Check if waiting player's socket is still connected somewhere
+      const gameId = uuidv4().slice(0, 8);
+      const game = createGame(gameId);
+      game.players[waiting.playerId] = createPlayerData(waiting.playerId, waiting.name);
+      game.players[playerId] = createPlayerData(playerId, data.name);
+      game.playerOrder = [waiting.playerId, playerId];
+      game.phase = 'placing';
+      await saveGame(game);
+      await setWaiting(null);
 
-        // Join rooms — the waiting player's socket might be on the other instance
-        // Socket.IO Redis adapter handles cross-instance room joins via serverSideEmit
-        socket.join(gameId);
-        socket.gameId = gameId;
-        socket.playerId = playerId;
+      // Join rooms - the waiting player needs to be notified via Redis adapter
+      socket.join(gameId);
+      socket.gameId = gameId;
+      socket.playerId = playerId;
 
-        // Emit to waiting player via room (works cross-instance with Redis adapter)
-        // First, make the waiting player join the room from their instance
-        io.serverSideEmit('joinRoom', { playerId: waiting.playerId, gameId });
+      const p1 = game.players[waiting.playerId], p2 = game.players[playerId];
 
-        const p1 = game.players[waiting.playerId], p2 = game.players[playerId];
-
-        // Use io.to for cross-instance communication
-        setTimeout(async () => {
-          io.to(gameId).emit('gameJoined_broadcast', {
-            gameId,
-            players: {
-              [waiting.playerId]: { opponentName: p2.name },
-              [playerId]: { opponentName: p1.name },
-            }
-          });
-          io.to(gameId).emit('phaseChange', { phase: 'placing' });
-          const jackMsg = { text: randomQuote('gameStart') };
-          io.to(gameId).emit('jackMessage', jackMsg);
-          addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-          await saveGame(game);
-        }, 500);
-      } else {
-        await setWaitingPlayer(playerId, data.name);
-        socket.emit('waiting', { message: 'Looking for opponent...' });
+      // Emit to waiting player via their socket ID stored in Redis
+      const waitingSocketId = waiting.socketId;
+      if (waitingSocketId) {
+        io.to(waitingSocketId).emit('gameJoined', { gameId, playerId: waiting.playerId, opponentName: p2.name });
+        // Make the waiting player's socket join the game room
+        const waitingSockets = await io.in(waitingSocketId).fetchSockets();
+        for (const ws of waitingSockets) {
+          ws.join(gameId);
+          ws.gameId = gameId;
+          ws.playerId = waiting.playerId;
+        }
       }
-    } catch (err) {
-      console.error('findRandom error:', err);
-      socket.emit('error', { message: 'Failed to find match' });
-    }
-  });
 
-  // Handle cross-instance room join requests
-  io.on('joinRoom', (data, callback) => {
-    const sock = playerSockets.get(data.playerId);
-    if (sock) {
-      sock.join(data.gameId);
-      sock.gameId = data.gameId;
-      sock.playerId = data.playerId;
+      socket.emit('gameJoined', { gameId, playerId, opponentName: p1.name });
+      io.to(gameId).emit('phaseChange', { phase: 'placing' });
+      const jackMsg = { text: randomQuote('gameStart') };
+      io.to(gameId).emit('jackMessage', jackMsg);
+      addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+      await saveGame(game);
+    } else {
+      await setWaiting({ playerId, name: data.name, socketId: socket.id });
+      socket.emit('waiting', { message: 'Looking for opponent...' });
     }
-    if (callback) callback();
   });
 
   socket.on('cancelSearch', async () => {
-    const waiting = await getWaitingPlayer();
+    const waiting = await getWaiting();
     if (waiting && waiting.playerId === playerId) {
-      await clearWaitingPlayer();
+      await setWaiting(null);
       socket.emit('searchCancelled');
     }
   });
 
   socket.on('placeShips', async (data) => {
-    try {
-      const game = await getGame(socket.gameId);
-      if (!game || game.phase !== 'placing') return;
-      const pid = socket.playerId;
-      const player = game.players[pid];
-      if (!player || player.shipsPlaced) return;
-      const board = Array(10).fill(null).map(() => Array(10).fill(null));
-      const ships = {};
-      for (const ship of data.ships) {
-        const type = SHIP_TYPES.find(t => t.id === ship.id);
-        if (!type || ship.positions.length !== type.size) { socket.emit('error', { message: 'Invalid ship!' }); return; }
-        for (const pos of ship.positions) {
-          if (pos.r < 0 || pos.r > 9 || pos.c < 0 || pos.c > 9 || board[pos.r][pos.c] !== null) {
-            socket.emit('error', { message: 'Invalid placement!' }); return;
-          }
-          board[pos.r][pos.c] = ship.id;
+    const game = await getGame(socket.gameId);
+    if (!game || game.phase !== 'placing') return;
+    const pid = socket.playerId;
+    const player = game.players[pid];
+    if (!player || player.shipsPlaced) return;
+    const board = Array(10).fill(null).map(() => Array(10).fill(null));
+    const ships = {};
+    for (const ship of data.ships) {
+      const type = SHIP_TYPES.find(t => t.id === ship.id);
+      if (!type || ship.positions.length !== type.size) { socket.emit('error', { message: 'Invalid ship!' }); return; }
+      for (const pos of ship.positions) {
+        if (pos.r < 0 || pos.r > 9 || pos.c < 0 || pos.c > 9 || board[pos.r][pos.c] !== null) {
+          socket.emit('error', { message: 'Invalid placement!' }); return;
         }
-        ships[ship.id] = { positions: ship.positions, hits: 0, sunk: false };
+        board[pos.r][pos.c] = ship.id;
       }
-      player.board = board; player.ships = ships; player.shipsPlaced = true;
+      ships[ship.id] = { positions: ship.positions, hits: 0, sunk: false };
+    }
+    player.board = board; player.ships = ships; player.shipsPlaced = true;
+    await saveGame(game);
+    socket.emit('shipsPlaced', { success: true });
+    if (game.playerOrder.every(pid => game.players[pid].shipsPlaced)) {
+      game.phase = 'battle'; game.currentTurn = game.playerOrder[0];
       await saveGame(game);
-      socket.emit('shipsPlaced', { success: true });
-      if (game.playerOrder.every(pid => game.players[pid].shipsPlaced)) {
-        game.phase = 'battle'; game.currentTurn = game.playerOrder[0];
-        await saveGame(game);
-        io.to(game.id).emit('phaseChange', {
-          phase: 'battle', currentTurn: game.currentTurn,
-          turnName: game.players[game.currentTurn].name,
-        });
-        startIdleTimer(game.id);
-      }
-    } catch (err) {
-      console.error('placeShips error:', err);
+      io.to(game.id).emit('phaseChange', {
+        phase: 'battle', currentTurn: game.currentTurn,
+        turnName: game.players[game.currentTurn].name,
+      });
+      startIdleTimer(game.id);
     }
   });
 
   socket.on('fire', async (data) => {
-    try {
-      const game = await getGame(socket.gameId);
-      const pid = socket.playerId;
-      if (!game || game.phase !== 'battle' || game.currentTurn !== pid) return;
-      const { r, c } = data;
-      if (r < 0 || r > 9 || c < 0 || c > 9) return;
-      const opId = game.playerOrder.find(p => p !== pid);
-      const opponent = game.players[opId], shooter = game.players[pid];
-      if (shooter.shots[r][c] !== null) { socket.emit('error', { message: 'Already shot there!' }); return; }
-
-      // Check if opponent has been disconnected too long
-      if (await checkDisconnectTimeout(opId, game)) return;
-
-      clearIdleTimer(game.id);
-      const shipId = opponent.board[r][c];
-      let result, sunkShip = null;
-      if (shipId) {
-        result = 'hit'; shooter.shots[r][c] = 'hit'; opponent.ships[shipId].hits++;
-        if (opponent.ships[shipId].hits >= opponent.ships[shipId].positions.length) {
-          opponent.ships[shipId].sunk = true;
-          sunkShip = SHIP_TYPES.find(t => t.id === shipId);
-        }
-      } else { result = 'miss'; shooter.shots[r][c] = 'miss'; }
-
+    const game = await getGame(socket.gameId);
+    const pid = socket.playerId;
+    if (!game || game.phase !== 'battle' || game.currentTurn !== pid) return;
+    const { r, c } = data;
+    if (r < 0 || r > 9 || c < 0 || c > 9) return;
+    const opId = game.playerOrder.find(p => p !== pid);
+    const opponent = game.players[opId], shooter = game.players[pid];
+    if (shooter.shots[r][c] !== null) { socket.emit('error', { message: 'Already shot there!' }); return; }
+    clearIdleTimer(game.id);
+    const shipId = opponent.board[r][c];
+    let result, sunkShip = null;
+    if (shipId) {
+      result = 'hit'; shooter.shots[r][c] = 'hit'; opponent.ships[shipId].hits++;
+      if (opponent.ships[shipId].hits >= opponent.ships[shipId].positions.length) {
+        opponent.ships[shipId].sunk = true;
+        sunkShip = SHIP_TYPES.find(t => t.id === shipId);
+      }
+    } else { result = 'miss'; shooter.shots[r][c] = 'miss'; }
+    await saveGame(game);
+    const fireData = { shooter: pid, shooterName: shooter.name, r, c, result, sunkShip: sunkShip ? sunkShip.name : null };
+    io.to(game.id).emit('fireResult', fireData);
+    addChatLog(game, null, `${shooter.name} fires... ${result === 'hit' ? 'HIT' : 'MISS'}!${sunkShip ? ' ' + sunkShip.name + ' SUNK!' : ''}`, 'system');
+    setTimeout(() => {
+      const jackMsg = { text: randomQuote(sunkShip ? 'sunk' : result) };
+      io.to(game.id).emit('jackMessage', jackMsg);
+      addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+      saveGame(game);
+    }, 600);
+    if (allShipsSunk(opponent)) {
+      game.phase = 'finished'; game.winner = pid;
       await saveGame(game);
-
-      const fireData = { shooter: pid, shooterName: shooter.name, r, c, result, sunkShip: sunkShip ? sunkShip.name : null };
-      io.to(game.id).emit('fireResult', fireData);
-      addChatLog(game, null, `${shooter.name} fires... ${result === 'hit' ? 'HIT' : 'MISS'}!${sunkShip ? ' ' + sunkShip.name + ' SUNK!' : ''}`, 'system');
-
-      setTimeout(async () => {
-        const jackMsg = { text: randomQuote(sunkShip ? 'sunk' : result) };
+      setTimeout(() => {
+        io.to(game.id).emit('gameOver', { winner: pid, winnerName: shooter.name, loserName: opponent.name });
+        const jackMsg = { text: randomQuote('gameOver') };
         io.to(game.id).emit('jackMessage', jackMsg);
         addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-        await saveGame(game);
-      }, 600);
-
-      if (allShipsSunk(opponent)) {
-        game.phase = 'finished'; game.winner = pid;
-        await saveGame(game);
-        setTimeout(() => {
-          io.to(game.id).emit('gameOver', { winner: pid, winnerName: shooter.name, loserName: opponent.name });
-          const jackMsg = { text: randomQuote('gameOver') };
-          io.to(game.id).emit('jackMessage', jackMsg);
-        }, 1200);
-        return;
-      }
-      game.currentTurn = opId;
-      await saveGame(game);
-      io.to(game.id).emit('turnChange', { currentTurn: opId, turnName: opponent.name });
-      startIdleTimer(game.id);
-    } catch (err) {
-      console.error('fire error:', err);
+        saveGame(game);
+      }, 1200);
+      return;
     }
+    game.currentTurn = opId;
+    await saveGame(game);
+    io.to(game.id).emit('turnChange', { currentTurn: opId, turnName: opponent.name });
+    startIdleTimer(game.id);
   });
 
   socket.on('chatMessage', async (data) => {
-    try {
-      const game = await getGame(socket.gameId);
-      if (!game) return;
-      const pid = socket.playerId;
-      const player = game.players[pid];
-      if (!player) return;
-      const chatData = { sender: player.name, text: data.text, isJack: false };
-      io.to(game.id).emit('chatMessage', chatData);
-      addChatLog(game, player.name, data.text, 'player');
-      await saveGame(game);
-      if (Math.random() < 0.2) {
-        setTimeout(async () => {
-          const jackMsg = { text: randomQuote('chat') };
-          io.to(game.id).emit('jackMessage', jackMsg);
-          addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
-          await saveGame(game);
-        }, 1500);
-      }
-    } catch (err) {
-      console.error('chatMessage error:', err);
+    const game = await getGame(socket.gameId);
+    if (!game) return;
+    const pid = socket.playerId;
+    const player = game.players[pid];
+    if (!player) return;
+    const chatData = { sender: player.name, text: data.text, isJack: false };
+    io.to(game.id).emit('chatMessage', chatData);
+    addChatLog(game, player.name, data.text, 'player');
+    if (Math.random() < 0.2) {
+      setTimeout(() => {
+        const jackMsg = { text: randomQuote('chat') };
+        io.to(game.id).emit('jackMessage', jackMsg);
+        addChatLog(game, 'Cpt. Jack Sparrow', jackMsg.text, 'jack');
+        saveGame(game);
+      }, 1500);
     }
+    await saveGame(game);
   });
 
   socket.on('disconnect', async () => {
-    try {
-      // Clear waiting player if this was them
-      const waiting = await getWaitingPlayer();
-      if (waiting && waiting.playerId === playerId) {
-        await clearWaitingPlayer();
-      }
+    const waiting = await getWaiting();
+    if (waiting && waiting.playerId === playerId) {
+      await setWaiting(null);
+    }
 
-      if (socket.gameId && socket.playerId) {
-        const game = await getGame(socket.gameId);
-        if (game && game.phase !== 'finished' && game.players[socket.playerId]) {
-          game.players[socket.playerId].connected = false;
-          await saveGame(game);
+    if (socket.gameId && socket.playerId) {
+      const game = await getGame(socket.gameId);
+      if (game && game.phase !== 'finished' && game.players[socket.playerId]) {
+        game.players[socket.playerId].connected = false;
+        await saveGame(game);
 
-          // Store disconnect timestamp in Redis (survives container restarts)
-          await setDisconnectTime(socket.playerId, socket.gameId);
+        startDisconnectTimer(game.id, socket.playerId);
 
-          // Notify opponent
-          const opId = game.playerOrder.find(p => p !== socket.playerId);
-          if (opId) {
-            io.to(game.id).emit('opponentDisconnected', {
-              message: 'Yer opponent lost connection! Waiting 60s for them to return...',
-            });
-          }
-
-          // Schedule a check after 60s on this instance
-          setTimeout(async () => {
-            const currentGame = await getGame(socket.gameId);
-            if (currentGame && currentGame.players[socket.playerId] && !currentGame.players[socket.playerId].connected) {
-              await checkDisconnectTimeout(socket.playerId, currentGame);
-            }
-          }, 62000);
+        const opId = game.playerOrder.find(p => p !== socket.playerId);
+        if (opId) {
+          io.to(game.id).emit('opponentDisconnected', {
+            message: 'Yer opponent lost connection! Waiting 60s for them to return...',
+          });
         }
       }
-
-      if (playerId) playerSockets.delete(playerId);
-    } catch (err) {
-      console.error('disconnect error:', err);
     }
   });
 });
 
-// Handle cross-instance joinRoom events (for random matchmaking)
-io.on('joinRoom', (data, callback) => {
-  const sock = playerSockets.get(data.playerId);
-  if (sock) {
-    sock.join(data.gameId);
-    sock.gameId = data.gameId;
-    sock.playerId = data.playerId;
-  }
-  if (callback) callback();
-});
-
-// Cleanup finished games from Redis every 30 minutes
+// Cleanup finished games every 30 minutes
 setInterval(async () => {
-  try {
-    const keys = await redis.keys('game:*');
+  let cursor = '0';
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'game:*', 'COUNT', 100);
+    cursor = nextCursor;
     for (const key of keys) {
-      const game = JSON.parse(await redis.get(key));
-      if (game && (game.phase === 'finished' || (game.phase === 'waiting' && game.playerOrder.length < 2))) {
-        await redis.del(key);
-        for (const pid of game.playerOrder) await deletePlayerGame(pid);
-      }
+      const data = await redis.get(key);
+      if (!data) continue;
+      const game = JSON.parse(data);
+      if (game.phase === 'finished') await deleteGame(game.id);
+      if (game.phase === 'waiting' && game.playerOrder.length < 2) await deleteGame(game.id);
     }
-  } catch (err) {
-    console.error('Cleanup error:', err);
-  }
+  } while (cursor !== '0');
 }, 30 * 60 * 1000);
 
 app.get('/health', async (req, res) => {
   try {
     await redis.ping();
     res.status(200).json({ status: 'ok', instance: process.env.INSTANCE_ID || 'unknown', redis: 'connected' });
-  } catch {
-    res.status(503).json({ status: 'degraded', instance: process.env.INSTANCE_ID || 'unknown', redis: 'disconnected' });
+  } catch (e) {
+    res.status(503).json({ status: 'error', instance: process.env.INSTANCE_ID || 'unknown', redis: 'disconnected' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Battleship server on port ${PORT} (instance: ${process.env.INSTANCE_ID || 'unknown'})`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Battleship server on port ${PORT} (Redis: ${REDIS_URL})`));
